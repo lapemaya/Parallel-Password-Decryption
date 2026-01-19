@@ -196,7 +196,7 @@ for each random target password:
 
 ### 1. Clone the Repository
 ```bash
-git clone <[repository-url](https://github.com/lapemaya/Parallel-Password-Decryption)>
+git clone https://github.com/lapemaya/Parallel-Password-Decryption
 cd Password-Decryption
 ```
 
