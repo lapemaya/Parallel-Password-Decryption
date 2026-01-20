@@ -27,6 +27,7 @@ CSV_FILE="${RESULTS_DIR}/benchmark_${TIMESTAMP}.csv"
 
 # Array di numeri di thread da testare
 THREAD_COUNTS=(1 2 4 8 16 20)
+THREAD_COUNTS_NOWAIT=(1 2 4 8 16 20 25)
 
 # Numero di esecuzioni per media (ridotto per test più veloci)
 NUM_RUNS=1
@@ -243,7 +244,7 @@ echo -e "${BOLD}${MAGENTA}[FASE 3] Esecuzioni Parallele (NOWAIT)${NC}"
 echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo ""
 
-for threads in "${THREAD_COUNTS[@]}"; do
+for threads in "${THREAD_COUNTS_NOWAIT[@]}"; do
     echo -e "${BOLD}${BLUE}Testing NOWAIT con ${threads} threads${NC}"
     echo -e "${CYAN}────────────────────────────────────────────────${NC}"
 
@@ -362,7 +363,7 @@ echo -e "${BOLD}VERSIONE NOWAIT:${NC}"
 printf "${BOLD}%-10s %-12s %-10s %-12s %-15s${NC}\n" "Threads" "Time (s)" "Speedup" "Efficiency" "Pass/sec"
 echo -e "${CYAN}─────────────────────────────────────────────────────────────────${NC}"
 
-for threads in "${THREAD_COUNTS[@]}"; do
+for threads in "${THREAD_COUNTS_NOWAIT[@]}"; do
     time=${execution_times_nowait[$threads]}
     speedup=${speedups_nowait[$threads]}
     efficiency=${efficiencies_nowait[$threads]}
@@ -420,4 +421,3 @@ echo ""
 echo -e "${CYAN}Per visualizzare i grafici, esegui:${NC}"
 echo -e "  ${BOLD}python3 plot_benchmark.py ${CSV_FILE}${NC}"
 echo ""
-

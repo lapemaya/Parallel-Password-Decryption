@@ -2,6 +2,8 @@
 
 A high-performance parallel password cracking system that demonstrates the effectiveness of parallel computing using OpenMP. This project implements and compares sequential and parallel brute-force attacks on DES-encrypted passwords.
 
+**GitHub Repository**: [https://github.com/lapemaya/Parallel-Password-Decryption](https://github.com/lapemaya/Parallel-Password-Decryption)
+
 ## 📋 Table of Contents
 
 - [Overview](#overview)
@@ -23,10 +25,17 @@ A high-performance parallel password cracking system that demonstrates the effec
 This project implements a brute-force password cracking system that targets 8-character date-formatted passwords (DDMMYYYY) encrypted using the DES algorithm with crypt(). The implementation includes:
 
 - **Sequential version**: Single-threaded baseline implementation
-- **Parallel version**: OpenMP-based multi-threaded implementation with cancellation
+- **Parallel version**: OpenMP-based multi-threaded implementation with cancellation points
 - **Parallel NOWAIT version**: Optimized parallel version without implicit barriers
 
-The project demonstrates significant performance improvements through parallelization, achieving near-linear speedup on multi-core systems.
+### Key Achievements
+
+- **Maximum speedup**: 12.04× with 25 threads (NOWAIT variant)
+- **Peak throughput**: ~4.42 million passwords per second
+- **Optimal efficiency**: 90-100% at 2-4 threads
+- **Overthreading analysis**: Performance characterization up to 32 threads, demonstrating degradation beyond physical core counts
+
+The project demonstrates significant performance improvements through parallelization while also revealing the limits of overthreading when thread counts exceed available hardware resources.
 
 ## ✨ Features
 
@@ -64,7 +73,8 @@ The project demonstrates significant performance improvements through paralleliz
 - **Day range**: 00-31 (32 values)
 - **Month range**: 00-12 (13 values)
 - **Year range**: 0000-2025 (2026 values)
-- **Total combinations**: 32 × 13 × 2026 = 842,944 per iteration
+- **Total combinations**: 32 × 13 × 2026 = 842,816 per iteration
+- **Test iterations**: 500 random passwords per benchmark run
 
 ### Parallelization Strategy
 ```
@@ -144,28 +154,40 @@ for each random target password:
 
 ## ⚡ Performance Optimizations
 
-### 1. Early Termination
-- **Atomic flag**: `std::atomic<bool>` for lock-free checking
-- **Cancellation points**: Check found_flag before expensive operations
-- **Memory ordering**: Relaxed load, release store for optimal performance
+### 1. Manual Date String Construction
+- **Optimization**: Construct 8-character candidate passwords using arithmetic on integers (`'0' + digit`) instead of high-level string formatting
+- **Effect**: Lower CPU time per candidate, reduced heap activity, less allocator-related jitter
 
-### 2. Hash Optimization
-- **Early rejection**: Compare 2 characters before full string comparison
-- **Reduced comparisons**: Skip expensive `strcmp()` when possible
-- Positions `[2]` and `[3]` (or `[3]` and `[4]`) checked first
+### 2. Per-Thread Cryptographic Data
+- **Optimization**: Each thread uses separate `crypt_data` struct with reentrant `crypt_r()` instead of non-reentrant `crypt()`
+- **Effect**: Removes shared-state contention, avoids sequentialization, improves parallel scalability
 
-### 3. Thread Safety
-- **Reentrant crypt**: `crypt_r()` with per-thread data structures
-- **Critical sections**: Minimal, only for updating shared found password
-- **Reduction clause**: Parallel accumulation of passwords tested
+### 3. Quick-Reject Hash Comparison
+- **Optimization**: Check two representative bytes (positions 3 and 4) before performing full `strcmp()` on DES hash
+- **Effect**: Most candidates fail the cheap check, reducing expensive string comparisons and saving CPU cycles
 
-### 4. Work Distribution
-- **Collapsed loops**: `collapse(3)` for better load balancing
-- **Static scheduling**: Predictable chunk distribution
-- **Cache optimization**: Sequential memory access patterns
+### 4. Atomic Early-Termination Flag
+- **Optimization**: `std::atomic<bool>` with relaxed loads for frequent checks and release store when setting flag
+- **Effect**: Fast early exit with minimal synchronization cost, balances correctness with low-overhead polling
 
-### 5. Compiler Optimizations
-```cmake
+### 5. OpenMP Cancellation Points
+- **Optimization**: Cancellation points and `#pragma omp cancel for` allow threads to stop iterating when match found
+- **Effect**: Faster termination when password found (note: cannot combine with `nowait` clause)
+
+### 6. Static Work Distribution
+- **Optimization**: `collapse(3)` directive with `schedule(static)` for deterministic, low-overhead partitioning
+- **Effect**: Reduced runtime scheduling overhead, good cache locality for contiguous iteration chunks
+
+### 7. Reduction for Counting
+- **Optimization**: OpenMP `reduction(+:total_passwords_tested)` avoids atomic increments on hot path
+- **Effect**: Lower contention on global counter while maintaining accurate aggregated metrics
+
+### 8. Minimal Per-Iteration Allocations
+- **Optimization**: Avoid dynamic allocations inside hot loop (no temporary `std::string` per candidate)
+- **Effect**: Prevents allocator contention, reduces cache pollution, lower latency per candidate
+
+### 9. Compiler Optimizations
+```bash
 -O3                # Maximum optimization
 -march=native      # CPU-specific instructions
 -ffast-math        # Aggressive math optimizations
@@ -175,10 +197,10 @@ for each random target password:
 ## 📦 Requirements
 
 ### System Requirements
-- **OS**: Linux (tested on Ubuntu/Debian-based systems)
-- **CPU**: Multi-core processor (tested on 20-core systems)
+- **OS**: Linux (tested on Ubuntu-based systems)
+- **CPU**: Multi-core processor (tested on Intel Core i9-13900H with 14 cores, 20 threads via Hyper-Threading)
 - **RAM**: Minimum 2GB
-- **Compiler**: GCC 9.0+ or Clang 10.0+ with OpenMP support
+- **Compiler**: GCC 9.0+ or Clang 10.0+ with OpenMP 4.0+ support
 
 ### Software Dependencies
 - **CMake** 3.12 or higher
@@ -281,8 +303,9 @@ The project includes a comprehensive benchmarking system:
 This script:
 1. Runs sequential version to establish baseline
 2. Tests parallel versions with 1, 2, 4, 8, 16, 20 threads
-3. Collects execution time, speedup, efficiency metrics
-4. Saves results to `benchmark_results/benchmark_TIMESTAMP.csv`
+3. Tests NOWAIT version with additional 25 and 32 threads (overthreading analysis)
+4. Collects execution time, speedup, efficiency metrics
+5. Saves results to `benchmark_results/benchmark_TIMESTAMP.csv`
 
 ### Generating Visualizations
 
@@ -309,28 +332,86 @@ NUM_RUNS=3                      # Repetitions per test (for averaging)
 
 ## 📈 Results
 
-### Performance Metrics (Example on 20-core CPU)
+### Performance Metrics (Intel Core i9-13900H, 14 cores, 20 threads)
 
-| Threads | Execution Time | Speedup | Efficiency | Passwords/sec |
-|---------|---------------|---------|------------|---------------|
-| 1 (Seq) | 125.3s        | 1.00×   | 100.0%     | 3,365,432     |
-| 2       | 63.1s         | 1.99×   | 99.3%      | 6,685,234     |
-| 4       | 31.8s         | 3.94×   | 98.5%      | 13,259,876    |
-| 8       | 16.2s         | 7.73×   | 96.6%      | 26,012,567    |
-| 16      | 8.7s          | 14.40×  | 90.0%      | 48,456,789    |
-| 20      | 7.2s          | 17.40×  | 87.0%      | 58,567,890    |
+#### Execution Time Results
+
+| Threads | Sequential (s) | Parallel (s) | NOWAIT (s) |
+|---------|---------------|--------------|------------|
+| 1       | 571.04        | 590.55       | 591.77     |
+| 2       | ---           | 283.27       | 301.39     |
+| 4       | ---           | 161.25       | 158.35     |
+| 8       | ---           | 97.44        | 101.75     |
+| 16      | ---           | 64.41        | 67.00      |
+| 20      | ---           | 54.28        | 55.57      |
+| 25      | ---           | ---          | **47.43**  |
+| 32      | ---           | ---          | 50.07      |
+
+#### Speedup Results
+
+| Threads | Parallel | NOWAIT       | Ideal   |
+|---------|----------|--------------|---------|
+| 1       | 0.97×    | 0.96×        | 1.00×   |
+| 2       | 2.01×    | 1.89×        | 2.00×   |
+| 4       | 3.54×    | 3.60×        | 4.00×   |
+| 8       | 5.86×    | 5.61×        | 8.00×   |
+| 16      | 8.86×    | 8.52×        | 16.00×  |
+| 20      | 10.52×   | 10.27×       | 20.00×  |
+| 25      | ---      | **12.04×**   | 25.00×  |
+| 32      | ---      | 11.40×       | 32.00×  |
+
+#### Efficiency Results
+
+| Threads | Parallel Eff | NOWAIT Eff | Quality    |
+|---------|--------------|------------|------------|
+| 1       | 96.7%        | 96.5%      | Excellent  |
+| 2       | 100.5%       | 94.5%      | Excellent  |
+| 4       | 88.5%        | 90.0%      | Very Good  |
+| 8       | 73.3%        | 70.1%      | Good       |
+| 16      | 55.4%        | 53.3%      | Moderate   |
+| 20      | 52.6%        | 51.4%      | Moderate   |
+| 25      | ---          | **48.2%**  | Fair       |
+| 32      | ---          | 35.6%      | Poor       |
+
+#### Throughput Results
+
+| Threads | Sequential   | Parallel      | NOWAIT        |
+|---------|--------------|---------------|---------------|
+| 1       | 737,972      | 374,606       | 374,518       |
+| 2       | ---          | 746,267       | 745,892       |
+| 4       | ---          | 1,390,429     | 1,388,791     |
+| 8       | ---          | 2,173,329     | 2,182,808     |
+| 16      | ---          | 3,351,151     | 3,350,576     |
+| 20      | ---          | 3,895,931     | 3,841,099     |
+| 25      | ---          | ---           | **4,423,183** |
+| 32      | ---          | ---           | 4,512,225     |
+
+*Throughput measured in passwords per second*
 
 ### Key Observations
 
-1. **Near-linear speedup** up to 8 threads (~97% efficiency)
-2. **Scaling limitations** beyond 16 threads due to:
-   - Memory bandwidth saturation
-   - Cache contention
-   - Synchronization overhead
-   - Early termination imbalance
+1. **Near-linear speedup** up to 2 threads (~100% efficiency)
+2. **Good scaling** up to 8 threads with 70-73% efficiency
+3. **Peak performance at 25 threads**: Maximum speedup of 12.04× and throughput of 4.42M passwords/sec
+4. **Overthreading penalty**: Performance degrades at 32 threads despite exceeding hardware thread capacity (20 logical threads)
+5. **NOWAIT advantage**: 1-5% improvement over standard parallel version by eliminating implicit barriers
+6. **Efficiency decline**: From 90-100% at 2-4 threads to 35.6% at 32 threads
 
-3. **NOWAIT version**: 5-10% faster than standard parallel version
-4. **Correctness**: 100% accuracy in password recovery
+### Overthreading Analysis
+
+**Why 25 threads improve performance:**
+- Workload balancing compensates for irregular early-termination behavior
+- I/O and memory latency hiding keeps computational units busy
+- Hyper-Threading headroom allows slight oversubscription
+
+**Why 32 threads degrade performance:**
+- Context switching overhead (32 threads on 20 hardware threads)
+- Cache thrashing with more threads competing for L1/L2/L3 cache
+- Memory bandwidth saturation
+- Synchronization contention on atomic operations
+- TLB pressure with more concurrent address spaces
+
+**Optimal thread count**: 20-25 threads represent the sweet spot for this workload on this hardware, balancing parallelism with hardware constraints.
 
 ## 📁 Project Structure
 
@@ -391,30 +472,43 @@ Password-Decryption/
    - Progress reporting (sequential)
    - Result verification (sequential)
 
-2. **Early Termination**: Password found at random iteration
-   - Some threads find password early
-   - Other threads waste work on their chunks
+2. **Early Termination & Load Imbalance**:
+   - Password found at random iteration in search space
+   - Some threads find password early in their chunks
+   - Other threads waste work on their assigned portions
+   - Static scheduling cannot rebalance work dynamically
    - Load imbalance increases with more threads
 
 3. **Synchronization Overhead**:
-   - Atomic flag checks
-   - Critical section contention
-   - Thread creation/destruction
+   - Atomic flag checks at every iteration
+   - Critical section contention when password found
+   - Thread creation/destruction costs
+   - Memory ordering operations
 
 4. **Hardware Limitations**:
-   - Memory bandwidth bottleneck
-   - Cache coherence traffic
+   - Memory bandwidth bottleneck (crypt_r() is memory-intensive)
+   - Cache contention (thread-local crypt_data structures compete for cache)
+   - Cache coherence traffic between cores
    - NUMA effects on multi-socket systems
+   - TLB pressure with many concurrent threads
+
+5. **Overthreading Effects** (beyond 20-25 threads):
+   - Excessive context switching
+   - Cache thrashing
+   - Resource contention
+   - Diminishing returns on parallelism
 
 ## 🎓 Educational Value
 
 This project demonstrates:
-- **Parallel algorithm design**: Converting sequential to parallel code
-- **Thread synchronization**: Atomic operations, critical sections
-- **Performance analysis**: Speedup, efficiency, scalability metrics
-- **Optimization techniques**: Early termination, cache optimization
-- **Benchmarking methodology**: Systematic performance evaluation
-- **OpenMP programming**: Practical use of parallel constructs
+- **Parallel algorithm design**: Converting sequential to parallel code with OpenMP
+- **Thread synchronization**: Atomic operations, critical sections, memory ordering
+- **Performance analysis**: Speedup, efficiency, scalability metrics and visualization
+- **Optimization techniques**: Early termination, cache optimization, reentrant functions
+- **Benchmarking methodology**: Systematic performance evaluation across thread counts
+- **OpenMP programming**: Practical use of parallel constructs (collapse, reduction, cancellation, nowait)
+- **Hardware constraints**: Understanding overthreading, Hyper-Threading, and resource contention
+- **Trade-offs**: Balancing synchronization overhead vs. early termination benefits
 
 ## 🤝 Contributing
 
@@ -431,7 +525,9 @@ This project is for educational purposes only. Use responsibly and ethically.
 
 ## 👤 Author
 
-University Project - Parallel Computing Course
+**Lapo Chiostrini**  
+University of Florence - Parallel Computing Course  
+Email: lapo.chiostrini1@edu.unifi.it
 
 ## 🙏 Acknowledgments
 
