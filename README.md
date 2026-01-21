@@ -23,12 +23,10 @@ A high-performance parallel password cracking system that demonstrates the effec
 ## Documentation
 
 For a detailed technical analysis including:
-- Complete mathematical formulation of the convolution operation
 - In-depth discussion of optimization strategies
 - Comprehensive performance analysis with statistical metrics
-- Architectural considerations for CPU and GPU implementations
 
-Please refer to [/Parallel Password Decryption Report.pdf](Parallel Password Decryption Report.pdf) which contains the full academic report of this work.
+Please refer to Parallel Password Decryption Report.pdf which contains the full academic report of this work.
 
 ## 🎯 Overview
 
